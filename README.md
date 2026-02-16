@@ -13,7 +13,7 @@ Two machines, two webcams, two screens -- no network cable required.
 **Machine B** (has internet) watches Machine A's screen with a webcam, decodes the request, makes the real HTTP call, then encodes the response and displays it on *its* screen for Machine A's webcam to pick up.
 
 The visual link uses:
-- A **color grid** where each cell encodes 2-6 bits (4 to 64 colors)
+- A **color grid** where each cell encodes 1-6 bits (2 to 64 colors; defaults to black/white for reliability)
 - **Alignment markers** in the corners for perspective correction
 - **Adaptive palette calibration** to handle color shifts from different screens/cameras
 - **Reed-Solomon error correction** to recover from misread cells
@@ -21,7 +21,7 @@ The visual link uses:
 
 ### Encoding
 
-Binary data is packed into a grid of colored cells. Each cell represents 2 bits using 4 high-contrast colors. An alternating black/white border and 3x3 checkerboard markers in each corner enable the decoder to find and correct the frame from any angle.
+Binary data is packed into a grid of colored cells. By default each cell is black or white (1 bit), which maximizes camera decode reliability. Higher throughput modes use 4, 16, or 64 colors. An alternating black/white border and 3x3 checkerboard markers in each corner enable the decoder to find and correct the frame from any angle.
 
 ![Encoded Frame](docs/images/01_encoded_frame.png)
 
@@ -69,6 +69,10 @@ face2face client --port 8080
 # Then on Machine A:
 export http_proxy=http://localhost:8080
 curl http://httpbin.org/get
+
+# Override visual settings for faster throughput:
+face2face client --colors 4 --grid 32x32 --cell-size 20
+face2face server --colors 4 --grid 32x32 --cell-size 20
 ```
 
 ## Install on a remote machine
@@ -130,7 +134,7 @@ face2face/
   compression/     # Payload compression (zlib + header dictionary)
   cli/             # CLI entry points (client, server, calibrate, benchmark)
 tools/             # Real-hardware test and diagnostic scripts
-tests/             # Automated test suite (112 tests, no hardware needed)
+tests/             # Automated test suite (118 tests, no hardware needed)
 ```
 
 ## Configuration
@@ -139,9 +143,9 @@ Settings are stored in `~/.config/face2face/config.toml`:
 
 ```toml
 [visual]
-grid_cols = 16        # grid size (16x16 = conservative, 32x32 = more data)
-grid_rows = 16
-bits_per_cell = 2     # 2 = 4 colors (robust), 4 = 16 colors (faster)
+grid_cols = 24        # grid size (default 24x24, up to 48x48 for more data)
+grid_rows = 24
+bits_per_cell = 1     # 1 = B/W (most reliable), 2 = 4 colors, 4 = 16 colors
 cell_px = 28          # pixel size per cell
 
 [camera]
@@ -157,21 +161,27 @@ blank_hold_ms = 100   # sync gap between frames
 ecc_nsym = 20         # Reed-Solomon redundancy symbols
 ```
 
+## Status
+
+**Working end-to-end.** HTTP requests successfully proxy through the visual channel between two machines using webcams and screens. Tested with `curl` and `httpbin.org`.
+
 ## Performance
 
-| Setting | Conservative | Optimistic |
-|---------|-------------|-----------|
-| Grid | 16x16 | 48x48 |
-| Colors | 4 (2-bit) | 16 (4-bit) |
-| Bytes/frame | 42 | 1,152 |
-| Frame rate | 2 fps | 10 fps |
-| **Throughput** | **~60 B/s** | **~10 KB/s** |
+| Setting | Default (B/W) | Fast (4-color) | Optimistic |
+|---------|--------------|----------------|-----------|
+| Grid | 24x24 | 32x32 | 48x48 |
+| Colors | 2 (1-bit) | 4 (2-bit) | 16 (4-bit) |
+| Bytes/frame | ~60 | ~201 | ~1,152 |
+| Frame rate | 2 fps | 2 fps | 10 fps |
+| **Throughput** | **~100 B/s** | **~336 B/s** | **~10 KB/s** |
 
-At conservative settings, small HTTP responses return in seconds. Larger transfers (cloning a repo, downloading files) are slow but functional -- this is designed for air-gapped environments where *any* connectivity is valuable.
+The default black/white mode prioritizes decode reliability over speed. Use `--colors 4 --grid 32x32 --cell-size 20` on both sides to switch to 4-color mode for higher throughput once the link is stable.
+
+At default settings, small HTTP responses return in seconds. Larger transfers (cloning a repo, downloading files) are slow but functional -- this is designed for air-gapped environments where *any* connectivity is valuable.
 
 ## Tests
 
-All 112 tests run without any camera hardware:
+All 118 tests run without any camera hardware:
 
 ```bash
 pytest tests/ -v                        # full suite
