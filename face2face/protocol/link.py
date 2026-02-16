@@ -118,21 +118,29 @@ class ReceiveLink:
         Runs in a thread to avoid blocking the event loop.
         """
         loop = asyncio.get_event_loop()
-        frame = await loop.run_in_executor(None, self.capture.read_preprocessed)
-        if frame is None:
+        full_frame = await loop.run_in_executor(None, self.capture.read_preprocessed)
+        if full_frame is None:
             logger.debug("Webcam returned no frame")
             return None
 
+        # Crop to ROI if the monitor has one set
+        roi = self.monitor.roi if self.monitor is not None else None
+        decode_frame = self.monitor.crop_frame(full_frame) if roi else full_frame
+
         # Skip blank/sync frames
-        if self.decoder.is_blank_frame(frame):
+        if self.decoder.is_blank_frame(decode_frame):
             logger.debug("Blank/sync frame detected, skipping")
             if self.monitor is not None:
-                self.monitor.update(frame)
+                self.monitor.update(full_frame)
             return None
 
-        header, payload = self.decoder.decode_image(frame)
+        header, payload = self.decoder.decode_image(decode_frame)
+        # Map decoder corners back to full-frame coords for monitor overlay
+        corners = self.decoder.last_corners
+        if corners is not None and roi is not None:
+            corners = corners + np.array([roi[0], roi[1]], dtype=corners.dtype)
         if self.monitor is not None:
-            self.monitor.update(frame, self.decoder.last_corners)
+            self.monitor.update(full_frame, corners)
         if header is None:
             logger.debug("No data frame detected in webcam image")
             return None

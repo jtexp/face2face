@@ -199,6 +199,8 @@ face2face client --monitor
 face2face server --monitor
 ```
 
+The monitor window supports **ROI (Region of Interest) selection** to zoom the decoder into the grid area. Click and drag to draw a cyan rectangle around the grid on screen. Once set, only the selected region is fed to the decoder -- this improves detection by cutting out background noise and effectively increasing resolution on the grid. Right-click or press `r` to clear the ROI and return to full-frame decoding.
+
 If the visual link fails to decode (e.g. 100% CRC failures), use `--debug-capture` to save what the webcam actually sees:
 
 ```bash

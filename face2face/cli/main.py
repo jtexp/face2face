@@ -112,22 +112,23 @@ def client(ctx: click.Context, port: int | None, host: str | None,
             stop_event.set()
 
         loop = asyncio.get_event_loop()
-        if sys.platform != "win32":
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, handle_signal)
-            await stop_event.wait()
-        else:
-            # Windows doesn't support add_signal_handler; wait with
-            # periodic sleeps so KeyboardInterrupt can be raised.
-            try:
-                while True:
-                    await asyncio.sleep(1)
-            except KeyboardInterrupt:
-                pass
-
-        logger.info("Shutting down...")
-        await proxy.stop()
-        await channel.stop()
+        try:
+            if sys.platform != "win32":
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    loop.add_signal_handler(sig, handle_signal)
+                await stop_event.wait()
+            else:
+                # Windows doesn't support add_signal_handler; wait with
+                # periodic sleeps so KeyboardInterrupt can be raised.
+                try:
+                    while True:
+                        await asyncio.sleep(1)
+                except KeyboardInterrupt:
+                    pass
+        finally:
+            logger.info("Shutting down...")
+            await proxy.stop()
+            await channel.stop()
 
     asyncio.run(run())
 
@@ -183,6 +184,9 @@ def server(ctx: click.Context, fullscreen: bool,
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(sig, handle_signal)
 
+        # Track fire-and-forget request handler tasks
+        request_tasks: set[asyncio.Task] = set()
+
         # Main loop: dispatch incoming messages to forwarder
         async def dispatch_loop():
             while not stop_event.is_set():
@@ -192,24 +196,36 @@ def server(ctx: click.Context, fullscreen: bool,
                 msg_id, data = result
                 # Each message gets its own stream for response routing
                 stream_id = msg_id  # Use msg_id as stream_id for simplicity
-                asyncio.create_task(
+                task = asyncio.create_task(
                     forwarder.handle_request(stream_id, data))
+                request_tasks.add(task)
+                task.add_done_callback(request_tasks.discard)
 
         dispatch_task = asyncio.create_task(dispatch_loop())
 
-        if sys.platform != "win32":
-            await stop_event.wait()
-        else:
+        try:
+            if sys.platform != "win32":
+                await stop_event.wait()
+            else:
+                try:
+                    while True:
+                        await asyncio.sleep(1)
+                except KeyboardInterrupt:
+                    pass
+        finally:
+            dispatch_task.cancel()
             try:
-                while True:
-                    await asyncio.sleep(1)
-            except KeyboardInterrupt:
+                await dispatch_task
+            except asyncio.CancelledError:
                 pass
-
-        dispatch_task.cancel()
-        logger.info("Shutting down...")
-        await forwarder.stop()
-        await channel.stop()
+            # Cancel in-flight request handlers so they release the session
+            for task in request_tasks:
+                task.cancel()
+            if request_tasks:
+                await asyncio.gather(*request_tasks, return_exceptions=True)
+            logger.info("Shutting down...")
+            await forwarder.stop()
+            await channel.stop()
 
     asyncio.run(run())
 

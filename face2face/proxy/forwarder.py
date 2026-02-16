@@ -56,6 +56,8 @@ class ProxyForwarder:
         if self._session:
             await self._session.close()
             self._session = None
+            # Allow underlying SSL transports to close cleanly
+            await asyncio.sleep(0.25)
 
     async def run(self) -> None:
         """Main loop: receive requests from channel and forward them."""
