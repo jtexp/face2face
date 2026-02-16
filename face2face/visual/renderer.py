@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from .codec import CodecConfig, FrameEncoder, FrameHeader
+from .codec import CodecConfig, FrameEncoder, FrameFlags, FrameHeader
 
 log = logging.getLogger(__name__)
 
@@ -147,18 +147,12 @@ class ScreenRenderer:
             self.transmit_frame(payload, header)
 
     def show_idle(self) -> None:
-        """Show an idle pattern (e.g., alternating checkerboard)."""
+        """Show an encoded test frame so the grid is detectable at startup."""
         self._ensure_window()
-        h = self.codec_cfg.image_height
-        w = self.codec_cfg.image_width
-        img = np.zeros((h, w, 3), dtype=np.uint8)
-        # Checkerboard
-        cell = 40
-        for y in range(0, h, cell):
-            for x in range(0, w, cell):
-                if ((y // cell) + (x // cell)) % 2 == 0:
-                    img[y:y + cell, x:x + cell] = (128, 128, 128)
-        cv2.imshow(self.cfg.window_name, self._pad_image(img))
+        header = FrameHeader(msg_id=0, seq=0, total=1, flags=FrameFlags.KEEPALIVE)
+        payload = b"\x00" * min(16, self.codec_cfg.payload_bytes)
+        image = self.encoder.encode(payload, header)
+        cv2.imshow(self.cfg.window_name, self._pad_image(image))
         cv2.waitKey(1)
 
     def destroy(self) -> None:
