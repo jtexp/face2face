@@ -27,7 +27,7 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 MARKER_SIZE_CELLS = 3  # alignment marker occupies 3x3 cells in each corner
-HEADER_BYTES = 13  # msg_id(4) + seq(2) + total(2) + flags(1) + crc32(4)
+HEADER_BYTES = 15  # msg_id(4) + seq(2) + total(2) + flags(1) + hdr_crc16(2) + payload_crc32(4)
 
 
 class FrameFlags(IntEnum):
@@ -208,6 +208,11 @@ def _marker_pattern() -> np.ndarray:
 # Frame header
 # ---------------------------------------------------------------------------
 
+def _header_crc16(packed_fields: bytes) -> int:
+    """CRC16 over header fields (msg_id + seq + total + flags) for integrity."""
+    return zlib.crc32(packed_fields) & 0xFFFF
+
+
 @dataclass
 class FrameHeader:
     msg_id: int = 0       # 4 bytes — message identifier
@@ -216,13 +221,26 @@ class FrameHeader:
     flags: int = FrameFlags.DATA  # 1 byte
     crc32: int = 0         # 4 bytes — CRC32 of payload
 
+    _FIELDS_FMT = ">IHHB"  # 9 bytes: msg_id + seq + total + flags
+    _FULL_FMT = ">IHHBHI"  # 15 bytes: fields + hdr_crc16 + payload_crc32
+
     def pack(self) -> bytes:
-        return struct.pack(">IHHBI", self.msg_id, self.seq, self.total,
-                           self.flags, self.crc32)
+        fields = struct.pack(self._FIELDS_FMT, self.msg_id, self.seq,
+                             self.total, self.flags)
+        hdr_crc = _header_crc16(fields)
+        return fields + struct.pack(">HI", hdr_crc, self.crc32)
 
     @classmethod
-    def unpack(cls, data: bytes) -> "FrameHeader":
-        msg_id, seq, total, flags, crc = struct.unpack(">IHHBI", data[:HEADER_BYTES])
+    def unpack(cls, data: bytes) -> Optional["FrameHeader"]:
+        """Unpack header from bytes. Returns None if header CRC fails."""
+        if len(data) < HEADER_BYTES:
+            return None
+        msg_id, seq, total, flags, hdr_crc, crc = struct.unpack(
+            cls._FULL_FMT, data[:HEADER_BYTES])
+        # Verify header integrity
+        fields = struct.pack(cls._FIELDS_FMT, msg_id, seq, total, flags)
+        if _header_crc16(fields) != hdr_crc:
+            return None
         return cls(msg_id=msg_id, seq=seq, total=total, flags=flags, crc32=crc)
 
 
@@ -360,12 +378,12 @@ class FrameDecoder:
             return None, None
 
         header = FrameHeader.unpack(raw[:HEADER_BYTES])
+        if header is None:
+            return None, None
+
         payload = raw[HEADER_BYTES:HEADER_BYTES + cfg.payload_bytes]
 
-        # Trim payload to actual size based on frame context
-        # (caller should know the expected size from the protocol layer)
-
-        # Verify CRC
+        # Verify payload CRC
         actual_crc = zlib.crc32(payload) & 0xFFFFFFFF
         if actual_crc != header.crc32:
             # CRC mismatch — may need ECC or the frame is corrupt

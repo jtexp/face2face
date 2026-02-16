@@ -163,6 +163,10 @@ class ReceiveLink:
 
             header, payload, valid = result
 
+            # Ignore frames with failed CRC — header fields are unreliable
+            if not valid:
+                continue
+
             # Handle control frames
             if header.flags & FrameFlags.ACK:
                 logger.debug("RX: ACK for msg_id=%d seq=%d", header.msg_id, header.seq)
@@ -175,23 +179,12 @@ class ReceiveLink:
                     self._frame_callback("nack", header)
                 continue
 
-            # Data frame — send ACK/NACK back
+            # Data frame — send ACK back
             ack_payload, ack_header = self.arq.on_frame_received(header, valid)
-            if ack_header.flags == FrameFlags.ACK:
-                logger.debug("RX: sending ACK for msg_id=%d seq=%d/%d",
-                             header.msg_id, header.seq, header.total)
-                await ack_sender.send_control(
-                    FrameFlags.ACK, header.msg_id, header.seq)
-            else:
-                logger.debug("RX: sending NACK for msg_id=%d seq=%d/%d (CRC fail)",
-                             header.msg_id, header.seq, header.total)
-                await ack_sender.send_control(
-                    FrameFlags.NACK, header.msg_id, header.seq)
-                continue
-
-            # Skip duplicates for assembly
-            if not valid:
-                continue
+            logger.debug("RX: sending ACK for msg_id=%d seq=%d/%d",
+                         header.msg_id, header.seq, header.total)
+            await ack_sender.send_control(
+                FrameFlags.ACK, header.msg_id, header.seq)
 
             # Try to assemble
             complete = self.assembler.add_frame(header, payload)
