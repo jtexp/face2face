@@ -102,10 +102,18 @@ def client(ctx: click.Context, port: int | None, host: str | None,
             stop_event.set()
 
         loop = asyncio.get_event_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, handle_signal)
-
-        await stop_event.wait()
+        if sys.platform != "win32":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, handle_signal)
+            await stop_event.wait()
+        else:
+            # Windows doesn't support add_signal_handler; wait with
+            # periodic sleeps so KeyboardInterrupt can be raised.
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                pass
 
         logger.info("Shutting down...")
         await proxy.stop()
@@ -151,8 +159,9 @@ def server(ctx: click.Context, fullscreen: bool) -> None:
             stop_event.set()
 
         loop = asyncio.get_event_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, handle_signal)
+        if sys.platform != "win32":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, handle_signal)
 
         # Main loop: dispatch incoming messages to forwarder
         async def dispatch_loop():
@@ -167,7 +176,15 @@ def server(ctx: click.Context, fullscreen: bool) -> None:
                     forwarder.handle_request(stream_id, data))
 
         dispatch_task = asyncio.create_task(dispatch_loop())
-        await stop_event.wait()
+
+        if sys.platform != "win32":
+            await stop_event.wait()
+        else:
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                pass
 
         dispatch_task.cancel()
         logger.info("Shutting down...")
