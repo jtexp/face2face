@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -253,6 +254,17 @@ def benchmark(ctx: click.Context, duration: int, loopback: bool) -> None:
               f"({throughput * 8 / 1000:.1f} kbps)")
 
     asyncio.run(run())
+
+
+@cli.command()
+@click.option("--branch", "-b", default="claude/webcam-screen-http-proxy-jpxC1",
+              help="Git branch to install from")
+def update(branch: str) -> None:
+    """Update face2face to the latest version from GitHub."""
+    url = f"https://github.com/jtexp/face2face/archive/refs/heads/{branch}.zip"
+    click.echo(f"Updating from branch '{branch}' ...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", url])
+    click.echo("Update complete.")
 
 
 def main() -> None:
