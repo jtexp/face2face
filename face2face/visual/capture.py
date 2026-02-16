@@ -31,7 +31,16 @@ class WebcamCapture:
     def open(self) -> None:
         """Open the webcam."""
         logger.info("Opening webcam (index=%d) ...", self.config.camera_index)
-        self._cap = cv2.VideoCapture(self.config.camera_index)
+        # Use DSHOW on Windows, V4L2 on Linux to skip slow backend probing
+        if hasattr(cv2, "CAP_DSHOW") and __import__("sys").platform == "win32":
+            backend = cv2.CAP_DSHOW
+        else:
+            backend = cv2.CAP_V4L2
+        self._cap = cv2.VideoCapture(self.config.camera_index, backend)
+        if not self._cap.isOpened():
+            # Fallback: let OpenCV auto-detect
+            logger.debug("Backend %s failed, falling back to auto-detect", backend)
+            self._cap = cv2.VideoCapture(self.config.camera_index)
         if not self._cap.isOpened():
             raise RuntimeError(
                 f"Cannot open camera {self.config.camera_index}")
