@@ -44,9 +44,15 @@ class TestSymbolConversion:
         symbols = _bytes_to_symbols(b"\xab", 2)
         assert symbols == [2, 2, 2, 3]
 
+    def test_roundtrip_1bit(self):
+        data = b"\xab\xcd\xef"
+        symbols = _bytes_to_symbols(data, 1)
+        result = _symbols_to_bytes(symbols, 1, len(data))
+        assert result == data
+
     def test_long_data(self):
         data = bytes(range(256))
-        for bits in [2, 4, 6]:
+        for bits in [1, 2, 4, 6]:
             symbols = _bytes_to_symbols(data, bits)
             result = _symbols_to_bytes(symbols, bits, len(data))
             assert result == data
@@ -84,10 +90,10 @@ class TestFrameHeader:
 class TestCodecConfig:
     def test_defaults(self):
         cfg = CodecConfig()
-        assert cfg.grid_cols == 32
-        assert cfg.grid_rows == 32
-        assert cfg.bits_per_cell == 2
-        assert cfg.n_colors == 4
+        assert cfg.grid_cols == 24
+        assert cfg.grid_rows == 24
+        assert cfg.bits_per_cell == 1
+        assert cfg.n_colors == 2
 
     def test_data_cells(self):
         cfg = CodecConfig(grid_cols=32, grid_rows=32)
@@ -106,8 +112,8 @@ class TestCodecConfig:
 
 
 class TestFrameEncoderDecoder:
-    @pytest.mark.parametrize("grid_size", [16, 32])
-    @pytest.mark.parametrize("bits", [2, 4])
+    @pytest.mark.parametrize("grid_size", [16, 24, 32])
+    @pytest.mark.parametrize("bits", [1, 2, 4])
     def test_encode_decode_roundtrip(self, grid_size, bits):
         cfg = CodecConfig(grid_cols=grid_size, grid_rows=grid_size,
                           bits_per_cell=bits)

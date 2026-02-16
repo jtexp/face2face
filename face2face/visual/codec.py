@@ -7,6 +7,7 @@ A frame is an image consisting of:
 - Data cells arranged in an NxM grid, each cell colored to represent bits
 
 Color palettes:
+- 2 colors  → 1 bit per cell (black/white)
 - 4 colors  → 2 bits per cell
 - 16 colors → 4 bits per cell
 - 64 colors → 6 bits per cell
@@ -86,6 +87,7 @@ def _make_palette(bits_per_cell: int) -> np.ndarray:
 
 # Pre-built palettes
 PALETTES = {
+    1: _make_palette(1),
     2: _make_palette(2),
     4: _make_palette(4),
     6: _make_palette(6),
@@ -99,10 +101,10 @@ PALETTES = {
 @dataclass
 class CodecConfig:
     """Configuration for the visual codec."""
-    grid_cols: int = 32        # number of data cells horizontally
-    grid_rows: int = 32        # number of data cells vertically
-    bits_per_cell: int = 2     # 2, 4, or 6
-    cell_px: int = 20          # pixel size of each cell
+    grid_cols: int = 24        # number of data cells horizontally
+    grid_rows: int = 24        # number of data cells vertically
+    bits_per_cell: int = 1     # 1, 2, 4, or 6
+    cell_px: int = 28          # pixel size of each cell
     border_px: int = 4         # border thickness in cells (alternating B/W)
     marker_cells: int = MARKER_SIZE_CELLS
 

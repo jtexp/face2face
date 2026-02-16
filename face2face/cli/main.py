@@ -20,6 +20,37 @@ import click
 
 from .config import AppConfig, load_config, save_config
 
+# Map color count → bits_per_cell
+_COLORS_TO_BITS = {2: 1, 4: 2, 16: 4, 64: 6}
+
+
+def _parse_grid(value: str) -> tuple[int, int]:
+    """Parse a grid spec like '24x24' into (cols, rows)."""
+    parts = value.lower().split("x")
+    if len(parts) != 2:
+        raise click.BadParameter(f"Grid must be COLSxROWS, got '{value}'")
+    return int(parts[0]), int(parts[1])
+
+
+def _apply_visual_overrides(
+    config: AppConfig,
+    colors: int | None,
+    cell_size: int | None,
+    grid: str | None,
+) -> None:
+    """Apply --colors, --cell-size, --grid overrides to config."""
+    if colors is not None:
+        if colors not in _COLORS_TO_BITS:
+            raise click.BadParameter(
+                f"--colors must be one of {list(_COLORS_TO_BITS.keys())}, got {colors}")
+        config.bits_per_cell = _COLORS_TO_BITS[colors]
+    if cell_size is not None:
+        config.cell_px = cell_size
+    if grid is not None:
+        cols, rows = _parse_grid(grid)
+        config.grid_cols = cols
+        config.grid_rows = rows
+
 
 def _setup_logging(level: str) -> None:
     logging.basicConfig(
@@ -56,10 +87,18 @@ def cli(ctx: click.Context, config: str | None, verbose: bool) -> None:
               help="Show a live webcam monitor window for camera alignment")
 @click.option("--zoom", "-z", type=float, default=None,
               help="Software zoom level (e.g. 2.0 = crop to center 50%%)")
+@click.option("--colors", "-C", type=int, default=None,
+              help="Number of colors: 2 (B/W), 4, 16, 64")
+@click.option("--cell-size", "-s", type=int, default=None,
+              help="Cell pixel size (e.g. 20, 28, 32)")
+@click.option("--grid", "-g", type=str, default=None,
+              help="Grid dimensions as COLSxROWS (e.g. 24x24, 32x32)")
 @click.pass_context
 def client(ctx: click.Context, port: int | None, host: str | None,
            fullscreen: bool, debug_capture: str | None,
-           monitor: bool, zoom: float | None) -> None:
+           monitor: bool, zoom: float | None,
+           colors: int | None, cell_size: int | None,
+           grid: str | None) -> None:
     """Start the client (proxy server + visual transmitter/receiver).
 
     Run this on the machine that needs internet access.
@@ -84,6 +123,7 @@ def client(ctx: click.Context, port: int | None, host: str | None,
         config.enable_monitor = True
     if zoom is not None:
         config.camera_zoom = zoom
+    _apply_visual_overrides(config, colors, cell_size, grid)
 
     level = "DEBUG" if ctx.obj.get("verbose") else config.log_level
     _setup_logging(level)
@@ -149,10 +189,17 @@ def client(ctx: click.Context, port: int | None, host: str | None,
               help="Show a live webcam monitor window for camera alignment")
 @click.option("--zoom", "-z", type=float, default=None,
               help="Software zoom level (e.g. 2.0 = crop to center 50%%)")
+@click.option("--colors", "-C", type=int, default=None,
+              help="Number of colors: 2 (B/W), 4, 16, 64")
+@click.option("--cell-size", "-s", type=int, default=None,
+              help="Cell pixel size (e.g. 20, 28, 32)")
+@click.option("--grid", "-g", type=str, default=None,
+              help="Grid dimensions as COLSxROWS (e.g. 24x24, 32x32)")
 @click.pass_context
 def server(ctx: click.Context, fullscreen: bool,
            debug_capture: str | None, monitor: bool,
-           zoom: float | None) -> None:
+           zoom: float | None, colors: int | None,
+           cell_size: int | None, grid: str | None) -> None:
     """Start the server (HTTP forwarder + visual transmitter/receiver).
 
     Run this on the machine with internet access.
@@ -168,6 +215,7 @@ def server(ctx: click.Context, fullscreen: bool,
         config.enable_monitor = True
     if zoom is not None:
         config.camera_zoom = zoom
+    _apply_visual_overrides(config, colors, cell_size, grid)
 
     level = "DEBUG" if ctx.obj.get("verbose") else config.log_level
     _setup_logging(level)

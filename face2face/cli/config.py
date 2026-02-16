@@ -30,10 +30,10 @@ class AppConfig:
     proxy_timeout: float = 120.0
 
     # Visual codec
-    grid_cols: int = 32
-    grid_rows: int = 32
-    bits_per_cell: int = 2
-    cell_px: int = 20
+    grid_cols: int = 24
+    grid_rows: int = 24
+    bits_per_cell: int = 1
+    cell_px: int = 28
     border_px: int = 4
 
     # Screen renderer
