@@ -186,8 +186,21 @@ def install_shim_windows(venv_dir: Path):
         if shim_str.lower() not in current_path.lower():
             new_path = f"{current_path};{shim_str}" if current_path else shim_str
             winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
-            print(f"  Added {shim_dir} to user PATH.")
-            print("  Note: Restart your terminal for PATH changes to take effect.")
+            print(f"  Added {shim_dir} to user PATH (registry).")
+            # Broadcast WM_SETTINGCHANGE so Explorer picks up the new PATH.
+            # Running terminals still won't see it — they need to be reopened
+            # or manually refresh $env:Path.
+            try:
+                import ctypes
+                HWND_BROADCAST = 0xFFFF
+                WM_SETTINGCHANGE = 0x001A
+                SMTO_ABORTIFHUNG = 0x0002
+                ctypes.windll.user32.SendMessageTimeoutW(
+                    HWND_BROADCAST, WM_SETTINGCHANGE, 0,
+                    "Environment", SMTO_ABORTIFHUNG, 5000, None,
+                )
+            except Exception:
+                pass  # non-critical
         else:
             print(f"  {shim_dir} already on PATH.")
         winreg.CloseKey(key)
@@ -271,7 +284,36 @@ def main():
     deploy_config()
     install_shim(venv_dir)
 
-    print(textwrap.dedent(f"""
+    venv_dir = get_venv_dir()
+    shim_dir = venv_dir.parent / "bin"
+    shim = shim_dir / "face2face.cmd"
+
+    if sys.platform == "win32":
+        print(textwrap.dedent(f"""
+        ========================================
+        face2face installed successfully!
+        ========================================
+
+        IMPORTANT: Open a NEW terminal window for PATH changes to take effect,
+        then run:
+
+            face2face --help
+
+        Or use the full path right now (no new terminal needed):
+
+            "{shim}" --help
+
+        Start the server (on the machine with internet):
+            face2face server
+
+        Update later:
+            python bootstrap.py --update
+
+        Configuration:
+            {get_config_dir() / 'config.toml'}
+        """))
+    else:
+        print(textwrap.dedent(f"""
         ========================================
         face2face installed successfully!
         ========================================
@@ -283,11 +325,11 @@ def main():
             face2face server
 
         Update later:
-            face2face update
+            python bootstrap.py --update
 
         Configuration:
             {get_config_dir() / 'config.toml'}
-    """))
+        """))
 
 
 if __name__ == "__main__":
