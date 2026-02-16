@@ -369,7 +369,7 @@ class TestCombinedRealistic:
         cfg = CodecConfig(grid_cols=16, grid_rows=16, bits_per_cell=2, cell_px=32)
         ecc = ECCCodec(ECCConfig(nsym=20))
 
-        raw_payload = b"Harsh camera test"
+        raw_payload = b"Harsh test"
         ecc_payload = ecc.encode(raw_payload)
         assert len(ecc_payload) <= cfg.payload_bytes
         padded = ecc_payload + b"\x00" * (cfg.payload_bytes - len(ecc_payload))

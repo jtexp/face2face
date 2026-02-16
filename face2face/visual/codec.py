@@ -28,6 +28,8 @@ import numpy as np
 
 MARKER_SIZE_CELLS = 3  # alignment marker occupies 3x3 cells in each corner
 HEADER_BYTES = 15  # msg_id(4) + seq(2) + total(2) + flags(1) + hdr_crc16(2) + payload_crc32(4)
+HEADER_ECC_NSYM = 8  # RS symbols for header error correction (corrects up to 4 byte errors)
+ECC_HEADER_BYTES = HEADER_BYTES + HEADER_ECC_NSYM  # 23 bytes on the wire
 
 
 class FrameFlags(IntEnum):
@@ -121,8 +123,8 @@ class CodecConfig:
 
     @property
     def header_cells(self) -> int:
-        """Number of cells needed for the frame header."""
-        return _bytes_to_cells(HEADER_BYTES, self.bits_per_cell)
+        """Number of cells needed for the frame header (with ECC)."""
+        return _bytes_to_cells(ECC_HEADER_BYTES, self.bits_per_cell)
 
     @property
     def payload_cells(self) -> int:
@@ -252,6 +254,10 @@ class FrameHeader:
 class FrameEncoder:
     config: CodecConfig = field(default_factory=CodecConfig)
 
+    def __post_init__(self):
+        from reedsolo import RSCodec
+        self._header_rs = RSCodec(HEADER_ECC_NSYM)
+
     def encode(self, payload: bytes, header: FrameHeader) -> np.ndarray:
         """Encode payload + header into a BGR image (numpy array)."""
         cfg = self.config
@@ -263,8 +269,11 @@ class FrameEncoder:
         header.crc32 = zlib.crc32(padded) & 0xFFFFFFFF
         header_bytes = header.pack()
 
+        # ECC-protect the header so it can survive misread cells
+        ecc_header = bytes(self._header_rs.encode(header_bytes))
+
         # Convert header + payload to symbols
-        all_data = header_bytes + payload
+        all_data = ecc_header + payload
         symbols = _bytes_to_symbols(all_data, cfg.bits_per_cell)
 
         # Pad symbols to fill the grid
@@ -355,6 +364,10 @@ def _place_marker(grid: np.ndarray, r0: int, c0: int,
 class FrameDecoder:
     config: CodecConfig = field(default_factory=CodecConfig)
 
+    def __post_init__(self):
+        from reedsolo import RSCodec
+        self._header_rs = RSCodec(HEADER_ECC_NSYM)
+
     def decode_grid(self, grid: np.ndarray) -> tuple[Optional[FrameHeader], Optional[bytes]]:
         """Decode a symbol grid back to header + payload.
 
@@ -373,17 +386,23 @@ class FrameDecoder:
                 symbols.append(int(grid[r, c]))
 
         # Convert symbols to bytes
-        total_bytes = HEADER_BYTES + cfg.payload_bytes
+        total_bytes = ECC_HEADER_BYTES + cfg.payload_bytes
         raw = _symbols_to_bytes(symbols, cfg.bits_per_cell, total_bytes)
 
-        if len(raw) < HEADER_BYTES:
+        if len(raw) < ECC_HEADER_BYTES:
             return None, None
 
-        header = FrameHeader.unpack(raw[:HEADER_BYTES])
+        # ECC-decode the header (corrects up to 4 byte errors)
+        try:
+            header_bytes = bytes(self._header_rs.decode(raw[:ECC_HEADER_BYTES])[0])
+        except Exception:
+            return None, None
+
+        header = FrameHeader.unpack(header_bytes)
         if header is None:
             return None, None
 
-        payload = raw[HEADER_BYTES:HEADER_BYTES + cfg.payload_bytes]
+        payload = raw[ECC_HEADER_BYTES:ECC_HEADER_BYTES + cfg.payload_bytes]
 
         # Verify payload CRC
         actual_crc = zlib.crc32(payload) & 0xFFFFFFFF

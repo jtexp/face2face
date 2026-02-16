@@ -169,7 +169,7 @@ class TestJPEGRoundTrip:
         decoder = ImageFrameDecoder(cfg)
         ecc = ECCCodec(ECCConfig(nsym=20))
 
-        raw_payload = b"ECC test data!!"
+        raw_payload = b"ECC test!!"
         ecc_payload = ecc.encode(raw_payload)
         # Pad to fill the frame
         padded = ecc_payload + b"\x00" * (cfg.payload_bytes - len(ecc_payload))
@@ -197,7 +197,7 @@ class TestJPEGRoundTrip:
         else:
             # CRC failed — try ECC recovery on the raw symbols
             # Re-decode without CRC check by going through the grid
-            from face2face.visual.codec import FrameDecoder, HEADER_BYTES, _symbols_to_bytes, _in_marker
+            from face2face.visual.codec import FrameDecoder, ECC_HEADER_BYTES, _symbols_to_bytes, _in_marker
             grid_decoder = FrameDecoder(config=cfg)
 
             # Get the warped image and sample grid
@@ -215,9 +215,9 @@ class TestJPEGRoundTrip:
                         continue
                     symbols.append(int(grid[r, c]))
 
-            total_bytes = HEADER_BYTES + cfg.payload_bytes
+            total_bytes = ECC_HEADER_BYTES + cfg.payload_bytes
             raw = _symbols_to_bytes(symbols, cfg.bits_per_cell, total_bytes)
-            raw_data = raw[HEADER_BYTES:HEADER_BYTES + len(ecc_payload)]
+            raw_data = raw[ECC_HEADER_BYTES:ECC_HEADER_BYTES + len(ecc_payload)]
 
             recovered = ecc.decode(raw_data)
             assert recovered is not None, "ECC failed to recover from JPEG artifacts"
@@ -266,7 +266,7 @@ class TestGaussianNoise:
         decoder = ImageFrameDecoder(cfg)
         ecc = ECCCodec(ECCConfig(nsym=20))
 
-        raw_payload = b"Noisy channel test"
+        raw_payload = b"Noisy test"
         ecc_payload = ecc.encode(raw_payload)
         assert len(ecc_payload) <= cfg.payload_bytes, \
             f"ECC payload ({len(ecc_payload)}B) exceeds frame capacity ({cfg.payload_bytes}B)"
