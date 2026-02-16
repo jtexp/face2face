@@ -11,5 +11,5 @@ param(
 )
 
 $proxy = "http://${Host_}:${Port}"
-Write-Host "HEAD http://93.184.215.14/ via $proxy" -ForegroundColor Cyan
-curl.exe --proxy $proxy -v --max-time 120 -H "User-Agent:" -H "Accept:" http://93.184.215.14/
+Write-Host "HEAD http://1.1.1.1/ via $proxy" -ForegroundColor Cyan
+curl.exe --proxy $proxy -v --max-time 120 -H "User-Agent:" -H "Accept:" http://1.1.1.1/

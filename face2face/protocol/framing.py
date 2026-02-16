@@ -59,10 +59,13 @@ class MessageFramer:
         if chunk_size <= 0:
             raise ValueError("ECC overhead exceeds frame payload capacity")
 
+        # Prefix with 4-byte length so the assembler can trim padding
+        framed = struct.pack(">I", len(data)) + data
+
         chunks = []
         offset = 0
-        while offset < len(data):
-            chunks.append(data[offset:offset + chunk_size])
+        while offset < len(framed):
+            chunks.append(framed[offset:offset + chunk_size])
             offset += chunk_size
 
         if not chunks:
@@ -71,6 +74,10 @@ class MessageFramer:
         total = len(chunks)
         frames = []
         for seq, chunk in enumerate(chunks):
+            # Pad to chunk_size so the ECC codeword fills the frame exactly;
+            # without this, zero-padding from the visual codec shifts the RS
+            # parity and corrupts the last chunk on decode.
+            chunk = chunk.ljust(chunk_size, b"\x00")
             ecc_chunk = self.ecc.encode(chunk)
             header = FrameHeader(
                 msg_id=msg_id,
@@ -133,14 +140,18 @@ class MessageAssembler:
 
             if len(self._buffers[msg_id]) == self._totals[msg_id]:
                 # All chunks received — reassemble
-                message = b""
+                raw = b""
                 for i in range(total):
-                    message += self._buffers[msg_id][i]
+                    raw += self._buffers[msg_id][i]
                 # Clean up
                 del self._buffers[msg_id]
                 del self._totals[msg_id]
                 del self._timestamps[msg_id]
-                return message
+                # Strip 4-byte length prefix and trim padding
+                if len(raw) < 4:
+                    return raw
+                length = struct.unpack(">I", raw[:4])[0]
+                return raw[4:4 + length]
 
         return None
 
