@@ -9,6 +9,9 @@ pointing your webcam at your own screen.
 - Python 3.10+
 - A display large enough for the webcam to see the pattern clearly
 
+> **Running on WSL2?** See the [WSL2 Setup](#wsl2-setup) section first --
+> there are extra steps for webcam access and GUI windows.
+
 Install the project:
 
 ```bash
@@ -297,6 +300,269 @@ but extreme conditions can overwhelm it:
 - Check that the proxy server is listening: `curl http://localhost:8080/`
   should return a connection error (not "connection refused")
 - Try increasing `proxy_timeout` in the config
+
+## WSL2 Setup
+
+WSL2 needs extra work for two things: **webcam passthrough** (USB devices
+aren't exposed by default) and **GUI windows** (`cv2.imshow` needs a
+display server). The automated tests (`pytest tests/`) work fine on WSL2
+with no extra setup since they don't use real hardware.
+
+### GUI windows (cv2.imshow)
+
+**Windows 11** ships with WSLg, which provides X11/Wayland support
+out of the box. OpenCV windows just work.
+
+**Windows 10** also supports WSLg if you install WSL from the Microsoft
+Store (not the legacy "Windows Features" version):
+
+```powershell
+# In PowerShell (admin)
+wsl --install          # or install "Windows Subsystem for Linux" from Store
+wsl --update
+```
+
+Verify it works inside WSL:
+
+```bash
+echo $DISPLAY          # should print ":0"
+sudo apt install -y x11-apps
+xclock                 # should open a clock window
+```
+
+If `$DISPLAY` is empty or `xclock` fails, you're on the legacy WSL without
+WSLg. Either switch to the Store version, or install an X server on Windows
+(VcXsrv, Xming, or X410) and set:
+
+```bash
+export DISPLAY=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):0.0
+```
+
+Install the GUI libraries OpenCV needs:
+
+```bash
+sudo apt install -y libgtk-3-dev libxcb-xinerama0 libxcb-icccm4 \
+  libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+  libxcb-shape0
+```
+
+If you hit Qt/XCB plugin errors with the pip-installed OpenCV, either
+install the missing libs above or switch to the system package:
+
+```bash
+pip uninstall opencv-python
+sudo apt install -y python3-opencv
+```
+
+### Webcam passthrough (usbipd-win)
+
+The default WSL2 kernel does **not** include USB camera (V4L2/UVC) drivers.
+Getting a webcam working requires two steps: passing the USB device into
+WSL2, and building a custom kernel with camera support.
+
+#### Step A: Install usbipd-win
+
+On the **Windows side** (PowerShell as admin):
+
+```powershell
+winget install --exact dorssel.usbipd-win
+```
+
+Then list, bind, and attach your webcam:
+
+```powershell
+# List USB devices -- find your webcam's BUSID (e.g. 2-3)
+usbipd list
+
+# Bind it (one-time, persists across reboots)
+usbipd bind --busid <BUSID>
+
+# Attach it to WSL (must redo after each reboot/sleep/unplug)
+usbipd attach --wsl --busid <BUSID>
+```
+
+Inside WSL, confirm the device is visible:
+
+```bash
+lsusb    # should show your webcam
+```
+
+If you get a firewall error, allow TCP port 3240 in Windows Firewall.
+
+#### Step B: Build a custom WSL2 kernel with V4L2/UVC
+
+Even with usbipd attached, `ls /dev/video*` will show nothing because
+the stock kernel lacks camera drivers. You need to compile a kernel with
+V4L2 and UVC enabled.
+
+```bash
+# Inside WSL2
+# 1. Install build dependencies
+sudo apt install -y build-essential flex bison libelf-dev libncurses-dev \
+  autoconf libudev-dev libtool libssl-dev dwarves bc v4l-utils
+
+# 2. Clone the WSL2 kernel source
+git clone https://github.com/microsoft/WSL2-Linux-Kernel.git \
+  --depth=1 -b linux-msft-wsl-6.6.y
+cd WSL2-Linux-Kernel
+
+# 3. Start from the stock config
+cp Microsoft/config-wsl .config
+
+# 4. Enable camera drivers
+make menuconfig
+```
+
+In the `menuconfig` TUI, enable these (press `y` to set as built-in `*`):
+
+```
+Device Drivers
+  -> Multimedia support
+       -> Filter media drivers                     [*]
+       -> Media device types
+            -> Cameras and video grabbers          [*]
+       -> Video4Linux options
+            -> V4L2 sub-device userspace API       [*]
+       -> Media drivers
+            -> Media USB Adapters
+                 -> USB Video Class (UVC)          [*]
+                 -> UVC input events device support [*]
+```
+
+Save and exit, then build:
+
+```bash
+# 5. Build (takes 10-30 minutes depending on your machine)
+make -j $(nproc)
+
+# 6. Copy the kernel to the Windows filesystem
+WINUSER=$(cmd.exe /C "echo %USERNAME%" 2>/dev/null | tr -d '\r')
+mkdir -p /mnt/c/Users/${WINUSER}/wsl
+cp arch/x86/boot/bzImage /mnt/c/Users/${WINUSER}/wsl/bzImage-v4l2
+```
+
+Tell WSL to use your custom kernel. Create or edit
+`C:\Users\<YourUser>\.wslconfig`:
+
+```ini
+[wsl2]
+kernel=C:\\Users\\<YourUser>\\wsl\\bzImage-v4l2
+```
+
+Restart WSL from PowerShell:
+
+```powershell
+wsl --shutdown
+```
+
+Re-open your WSL terminal, re-attach the webcam, and verify:
+
+```bash
+# Re-attach first (from PowerShell):  usbipd attach --wsl --busid <BUSID>
+
+# Then in WSL:
+ls /dev/video*          # should now show /dev/video0, /dev/video1, etc.
+v4l2-ctl --list-devices # should show your webcam
+```
+
+If `/dev/video0` exists but OpenCV can't open it:
+
+```bash
+sudo chmod 666 /dev/video*
+# or permanently:
+sudo usermod -aG video $USER
+```
+
+#### Step C: Test the camera
+
+```bash
+python -c "
+import cv2
+cap = cv2.VideoCapture(0)
+ret, frame = cap.read()
+if ret:
+    print(f'Camera OK: {frame.shape[1]}x{frame.shape[0]}')
+else:
+    print('ERROR: Cannot read from camera')
+cap.release()
+"
+```
+
+If you get `select() timeout` errors, reduce the resolution:
+
+```bash
+python -c "
+import cv2
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+ret, frame = cap.read()
+print('OK' if ret else 'FAIL')
+cap.release()
+"
+```
+
+USB-over-IP adds latency, so 640x480 is more reliable than 1080p.
+
+### Alternative: Skip the kernel build entirely
+
+If building a custom kernel sounds like too much, there are two options
+that work without one:
+
+**Option 1: Run the automated tests (no camera needed)**
+
+All 112 tests run without any camera hardware. They simulate the full
+visual pipeline including camera degradation, geometry distortion, and
+JPEG artifacts:
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+**Option 2: Capture on Windows, process in WSL**
+
+Use a small Python script on the Windows side to grab webcam frames and
+write them to a shared folder that WSL can read:
+
+```python
+# Run this on Windows (not WSL), e.g. with Windows Python
+# save as capture_loop.py
+import cv2, time, os
+cap = cv2.VideoCapture(0)
+out_dir = r"C:\Users\YourUser\wsl_frames"
+os.makedirs(out_dir, exist_ok=True)
+while True:
+    ret, frame = cap.read()
+    if ret:
+        cv2.imwrite(os.path.join(out_dir, "latest.png"), frame)
+    time.sleep(0.1)
+```
+
+Then in WSL, read `/mnt/c/Users/YourUser/wsl_frames/latest.png` with
+OpenCV. This avoids USB passthrough entirely but adds ~100ms latency.
+
+### WSL2 quick reference
+
+| What | Status | What you need |
+|---|---|---|
+| `pytest tests/` | Works out of the box | Nothing extra |
+| `cv2.imshow` (GUI) | Works with WSLg | Windows 11, or Store WSL on Win 10 |
+| USB webcam | NOT in default kernel | usbipd-win + custom kernel build |
+| Loopback benchmark | Works out of the box | `face2face benchmark --loopback` |
+
+### WSL2 troubleshooting
+
+| Error | Cause | Fix |
+|---|---|---|
+| `lsusb` shows webcam but no `/dev/video*` | Stock kernel lacks V4L2 | Build custom kernel (Step B above) |
+| `VIDEOIO(V4L2): can't open camera by index` | Same as above | Build custom kernel |
+| `Permission denied` on `/dev/video0` | Device permissions | `sudo chmod 666 /dev/video*` |
+| `select() timeout` | USB/IP bandwidth | Reduce to 640x480 |
+| `qt.qpa.xcb: could not connect to display` | No display server | Install WSLg or X server |
+| `Could not load Qt platform plugin "xcb"` | Missing xcb libs | `sudo apt install libxcb-xinerama0` |
+| Firewall blocking usbipd | TCP 3240 blocked | Allow port 3240 in Windows Firewall |
+| Webcam gone after sleep/reboot | usbipd attach is not persistent | Re-run `usbipd attach --wsl --busid <BUSID>` |
 
 ## Automated Tests (no hardware needed)
 
