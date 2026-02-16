@@ -2,14 +2,34 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
 
 from .codec import CodecConfig, FrameEncoder, FrameHeader
+
+log = logging.getLogger(__name__)
+
+
+def _get_screen_size() -> Optional[Tuple[int, int]]:
+    """Return (width, height) of the primary screen using tkinter.
+
+    Returns None if tkinter is unavailable or detection fails.
+    """
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        w = root.winfo_screenwidth()
+        h = root.winfo_screenheight()
+        root.destroy()
+        return (w, h)
+    except Exception:
+        return None
 
 
 @dataclass
@@ -41,8 +61,36 @@ class ScreenRenderer:
                                   cv2.WND_PROP_FULLSCREEN,
                                   cv2.WINDOW_FULLSCREEN)
         else:
-            cv2.namedWindow(self.cfg.window_name, cv2.WINDOW_AUTOSIZE)
+            cv2.namedWindow(self.cfg.window_name, cv2.WINDOW_NORMAL)
+            self._fit_window_to_screen()
         self._window_created = True
+
+    def _fit_window_to_screen(self) -> None:
+        """Resize the window to fit the screen if the image is too large."""
+        pad = self.cfg.display_padding if not self.cfg.fullscreen else 0
+        img_w = self.codec_cfg.image_width + 2 * pad
+        img_h = self.codec_cfg.image_height + 2 * pad
+
+        screen = _get_screen_size()
+        if screen is None:
+            log.debug("Could not detect screen size; skipping auto-fit")
+            return
+
+        screen_w, screen_h = screen
+        max_w = int(screen_w * 0.9)
+        max_h = int(screen_h * 0.9)
+
+        if img_w <= max_w and img_h <= max_h:
+            # Image fits fine — just set the window to the exact image size
+            cv2.resizeWindow(self.cfg.window_name, img_w, img_h)
+            return
+
+        scale = min(max_w / img_w, max_h / img_h)
+        win_w = int(img_w * scale)
+        win_h = int(img_h * scale)
+        log.debug("Auto-fitting window: %dx%d -> %dx%d (scale %.2f, screen %dx%d)",
+                  img_w, img_h, win_w, win_h, scale, screen_w, screen_h)
+        cv2.resizeWindow(self.cfg.window_name, win_w, win_h)
 
     def _pad_image(self, image: np.ndarray) -> np.ndarray:
         """Add black padding around an image to isolate it from window chrome.
