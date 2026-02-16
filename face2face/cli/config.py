@@ -46,6 +46,7 @@ class AppConfig:
     camera_width: int = 1280
     camera_height: int = 720
     camera_fps: int = 30
+    camera_zoom: float = 1.0
 
     # Error correction
     ecc_nsym: int = 20
@@ -88,6 +89,7 @@ class AppConfig:
             width=self.camera_width,
             height=self.camera_height,
             fps=self.camera_fps,
+            zoom=self.camera_zoom,
         )
 
     def to_ecc_config(self) -> ECCConfig:

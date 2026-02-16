@@ -54,10 +54,12 @@ def cli(ctx: click.Context, config: str | None, verbose: bool) -> None:
               help="Save debug frames (raw, warped, grid) to this directory")
 @click.option("--monitor", "-m", is_flag=True, default=False,
               help="Show a live webcam monitor window for camera alignment")
+@click.option("--zoom", "-z", type=float, default=None,
+              help="Software zoom level (e.g. 2.0 = crop to center 50%%)")
 @click.pass_context
 def client(ctx: click.Context, port: int | None, host: str | None,
            fullscreen: bool, debug_capture: str | None,
-           monitor: bool) -> None:
+           monitor: bool, zoom: float | None) -> None:
     """Start the client (proxy server + visual transmitter/receiver).
 
     Run this on the machine that needs internet access.
@@ -80,6 +82,8 @@ def client(ctx: click.Context, port: int | None, host: str | None,
         config.debug_capture_dir = debug_capture
     if monitor:
         config.enable_monitor = True
+    if zoom is not None:
+        config.camera_zoom = zoom
 
     level = "DEBUG" if ctx.obj.get("verbose") else config.log_level
     _setup_logging(level)
@@ -143,9 +147,12 @@ def client(ctx: click.Context, port: int | None, host: str | None,
               help="Save debug frames (raw, warped, grid) to this directory")
 @click.option("--monitor", "-m", is_flag=True, default=False,
               help="Show a live webcam monitor window for camera alignment")
+@click.option("--zoom", "-z", type=float, default=None,
+              help="Software zoom level (e.g. 2.0 = crop to center 50%%)")
 @click.pass_context
 def server(ctx: click.Context, fullscreen: bool,
-           debug_capture: str | None, monitor: bool) -> None:
+           debug_capture: str | None, monitor: bool,
+           zoom: float | None) -> None:
     """Start the server (HTTP forwarder + visual transmitter/receiver).
 
     Run this on the machine with internet access.
@@ -159,6 +166,8 @@ def server(ctx: click.Context, fullscreen: bool,
         config.debug_capture_dir = debug_capture
     if monitor:
         config.enable_monitor = True
+    if zoom is not None:
+        config.camera_zoom = zoom
 
     level = "DEBUG" if ctx.obj.get("verbose") else config.log_level
     _setup_logging(level)

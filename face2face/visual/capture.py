@@ -19,6 +19,7 @@ class CaptureConfig:
     height: int = 720
     fps: int = 30
     auto_exposure: bool = True
+    zoom: float = 1.0  # software center-crop zoom (2.0 = crop to center 50%)
 
 
 class WebcamCapture:
@@ -62,11 +63,24 @@ class WebcamCapture:
             return None
         return frame
 
+    def _apply_zoom(self, frame: np.ndarray) -> np.ndarray:
+        """Center-crop the frame according to the zoom level."""
+        z = self.config.zoom
+        if z <= 1.0:
+            return frame
+        h, w = frame.shape[:2]
+        new_w = int(w / z)
+        new_h = int(h / z)
+        x = (w - new_w) // 2
+        y = (h - new_h) // 2
+        return frame[y:y + new_h, x:x + new_w]
+
     def read_preprocessed(self) -> Optional[np.ndarray]:
         """Read a frame with brightness/contrast normalization."""
         frame = self.read()
         if frame is None:
             return None
+        frame = self._apply_zoom(frame)
         # Convert to LAB, normalize L channel, convert back
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
