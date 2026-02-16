@@ -6,6 +6,10 @@ Two machines, two webcams, two screens -- no network cable required.
 
 ![Architecture](docs/images/05_architecture.png)
 
+## Status
+
+**Working end-to-end.** HTTP requests successfully proxy through the visual channel between two machines using webcams and screens. Tested with `curl` and `httpbin.org`.
+
 ## How it works
 
 **Machine A** (air-gapped, no internet) runs an HTTP proxy on `localhost:8080`. When an app like `curl` or `git` makes a request, the proxy encodes it into a colored grid and displays it on screen.
@@ -40,21 +44,7 @@ The detected quad (green outline) is used to warp the image back to a clean rect
 ## Quick start
 
 ```bash
-# Install
 pip install -e ".[dev]"
-
-# Run the automated test suite (no hardware needed)
-pytest tests/ -v
-```
-
-### Real webcam-at-screen test (single machine)
-
-```bash
-# Check webcam works
-python tools/webcam_check.py
-
-# Display an encoded frame and decode it live with the webcam
-python tools/live_decode_test.py
 ```
 
 ### Full proxy (two machines)
@@ -75,67 +65,19 @@ face2face client --colors 4 --grid 32x32 --cell-size 20
 face2face server --colors 4 --grid 32x32 --cell-size 20
 ```
 
-## Install on a remote machine
+## Performance
 
-To deploy face2face on a second machine (e.g. the server laptop), you only need Python 3.10+ -- no git required.
+| Setting | Default (B/W) | Fast (4-color) | Optimistic |
+|---------|--------------|----------------|-----------|
+| Grid | 24x24 | 32x32 | 48x48 |
+| Colors | 2 (1-bit) | 4 (2-bit) | 16 (4-bit) |
+| Bytes/frame | ~60 | ~201 | ~1,152 |
+| Frame rate | 2 fps | 2 fps | 10 fps |
+| **Throughput** | **~100 B/s** | **~336 B/s** | **~10 KB/s** |
 
-**macOS / Linux:**
+The default black/white mode prioritizes decode reliability over speed. Use `--colors 4 --grid 32x32 --cell-size 20` on both sides to switch to 4-color mode for higher throughput once the link is stable.
 
-```bash
-curl -sL "https://raw.githubusercontent.com/jtexp/face2face/claude/webcam-screen-http-proxy-jpxC1/deploy/bootstrap.py" \
-  -o /tmp/f2f_bootstrap.py && python3 /tmp/f2f_bootstrap.py
-```
-
-**Windows PowerShell:**
-
-```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/jtexp/face2face/claude/webcam-screen-http-proxy-jpxC1/deploy/bootstrap.py" -OutFile "$env:TEMP\f2f_bootstrap.py"; python "$env:TEMP\f2f_bootstrap.py"
-```
-
-This creates an isolated venv, installs face2face, writes a default config, and puts `face2face` on your PATH.
-
-**Updating after the initial install:**
-
-```bash
-face2face update
-```
-
-Or from your dev machine via SSH: `ssh laptop "face2face update"`
-
-**Bootstrap flags:**
-
-| Flag | Description |
-|------|-------------|
-| `--branch <name>` | Install from a specific branch |
-| `--update` | Re-install into existing venv (skip venv creation) |
-| `--uninstall` | Remove the installation |
-| `--local <path>` | Install from a local directory or zip |
-
-## Project structure
-
-```
-face2face/
-  visual/          # Frame encoding/decoding, screen rendering, webcam capture
-    codec.py       #   Color grid codec (encode/decode binary <-> color cells)
-    decoder.py     #   Frame detection + perspective correction from camera images
-    renderer.py    #   Screen display with OpenCV
-    capture.py     #   Webcam capture
-    camera_sim.py  #   Realistic camera degradation simulator (for tests)
-    ecc.py         #   Reed-Solomon error correction
-  protocol/        # Link-layer protocol
-    framing.py     #   Message chunking and reassembly
-    flow.py        #   ARQ flow control (stop-and-wait / sliding window)
-    link.py        #   Unidirectional visual link manager
-    channel.py     #   Bidirectional multiplexed channel
-  proxy/           # HTTP proxy layer
-    server.py      #   HTTP/HTTPS proxy server (Machine A)
-    forwarder.py   #   HTTP request forwarder (Machine B)
-    serialization.py # Compact binary serialization for HTTP messages
-  compression/     # Payload compression (zlib + header dictionary)
-  cli/             # CLI entry points (client, server, calibrate, benchmark)
-tools/             # Real-hardware test and diagnostic scripts
-tests/             # Automated test suite (118 tests, no hardware needed)
-```
+At default settings, small HTTP responses return in seconds. Larger transfers (cloning a repo, downloading files) are slow but functional -- this is designed for air-gapped environments where *any* connectivity is valuable.
 
 ## Configuration
 
@@ -161,72 +103,24 @@ blank_hold_ms = 100   # sync gap between frames
 ecc_nsym = 20         # Reed-Solomon redundancy symbols
 ```
 
-## Status
-
-**Working end-to-end.** HTTP requests successfully proxy through the visual channel between two machines using webcams and screens. Tested with `curl` and `httpbin.org`.
-
-## Performance
-
-| Setting | Default (B/W) | Fast (4-color) | Optimistic |
-|---------|--------------|----------------|-----------|
-| Grid | 24x24 | 32x32 | 48x48 |
-| Colors | 2 (1-bit) | 4 (2-bit) | 16 (4-bit) |
-| Bytes/frame | ~60 | ~201 | ~1,152 |
-| Frame rate | 2 fps | 2 fps | 10 fps |
-| **Throughput** | **~100 B/s** | **~336 B/s** | **~10 KB/s** |
-
-The default black/white mode prioritizes decode reliability over speed. Use `--colors 4 --grid 32x32 --cell-size 20` on both sides to switch to 4-color mode for higher throughput once the link is stable.
-
-At default settings, small HTTP responses return in seconds. Larger transfers (cloning a repo, downloading files) are slow but functional -- this is designed for air-gapped environments where *any* connectivity is valuable.
-
-## Tests
-
-All 118 tests run without any camera hardware:
-
-```bash
-pytest tests/ -v                        # full suite
-pytest tests/test_camera_sim.py -v      # camera degradation simulation
-pytest tests/test_geometry.py -v        # off-axis rotation/keystone
-pytest tests/test_integration.py -v     # full proxy stack (loopback)
-pytest tests/test_visual_roundtrip.py -v # encode -> save -> load -> decode
-```
-
-## Tools
-
-| Script | Purpose |
-|--------|---------|
-| `tools/webcam_check.py` | Verify webcam is accessible |
-| `tools/live_decode_test.py` | Live encode-display-capture-decode loop |
-| `tools/decode_diagnose.py` | Step-by-step decode diagnostic |
-| `tools/capture_readme_images.py` | Generate the images in this README |
-
 ## Debugging
 
-Use `--monitor` / `-m` to open a small live-preview window showing the webcam feed. When the decoder detects the frame quad, it's drawn as a green polygon; a colored status circle (green = frame detected, red = not detected) provides at-a-glance feedback. This is useful for aiming the camera before and during operation:
+Use `--monitor` / `-m` to open a live-preview window showing the webcam feed with frame detection overlay (green quad + status circle). Supports ROI selection -- click and drag to zoom the decoder into the grid area:
 
 ```bash
 face2face client --monitor
 face2face server --monitor
 ```
 
-The monitor window supports **ROI (Region of Interest) selection** to zoom the decoder into the grid area. Click and drag to draw a cyan rectangle around the grid on screen. Once set, only the selected region is fed to the decoder -- this improves detection by cutting out background noise and effectively increasing resolution on the grid. Right-click or press `r` to clear the ROI and return to full-frame decoding.
-
-If the visual link fails to decode (e.g. 100% CRC failures), use `--debug-capture` to save what the webcam actually sees:
+If the visual link fails to decode, use `--debug-capture <dir>` to save raw, warped, and grid-overlay images per capture for diagnosis:
 
 ```bash
-# Save debug frames to a directory
 face2face client --debug-capture ./debug-frames
 face2face server --debug-capture ./debug-frames
 ```
 
-This saves three images per capture (rate-limited to 2/sec):
+## Further reading
 
-| File | Contents |
-|------|----------|
-| `0000_raw.png` | Raw webcam frame |
-| `0000_warped.png` | Perspective-corrected frame |
-| `0000_grid.png` | Warped frame with grid overlay and decoded cell colors |
-
-The grid overlay blends each cell with its decoded palette color and draws green cell boundaries, making it easy to spot where decoding goes wrong (color mis-classification, alignment drift, blurring, etc.).
-
-See [REAL_TEST_GUIDE.md](REAL_TEST_GUIDE.md) for detailed single-machine and WSL2 setup instructions.
+- [INSTALL.md](INSTALL.md) -- remote machine bootstrap, updating
+- [CONTRIBUTING.md](CONTRIBUTING.md) -- project structure, tests, tools
+- [REAL_TEST_GUIDE.md](REAL_TEST_GUIDE.md) -- single-machine webcam testing, WSL2 setup

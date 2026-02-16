@@ -511,7 +511,7 @@ that work without one:
 
 **Option 1: Run the automated tests (no camera needed)**
 
-All 112 tests run without any camera hardware. They simulate the full
+All 118 tests run without any camera hardware. They simulate the full
 visual pipeline including camera degradation, geometry distortion, and
 JPEG artifacts:
 
@@ -570,7 +570,7 @@ The project includes comprehensive automated tests that simulate the full
 visual pipeline without needing a webcam or screen:
 
 ```bash
-# Run all 112 tests
+# Run all 118 tests
 pytest tests/ -v
 
 # Just the camera simulation tests
