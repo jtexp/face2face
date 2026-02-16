@@ -54,6 +54,7 @@ class VisualChannel:
 
     async def start(self) -> None:
         """Start the channel — opens webcam, starts receive loop."""
+        logger.info("Starting visual channel ...")
         await self.rx.start()
         self._running = True
 
@@ -70,6 +71,7 @@ class VisualChannel:
             self.rx.run_receive_loop(self.tx))
         self._dispatch_task = asyncio.create_task(
             self._dispatch_loop())
+        logger.info("Visual channel ready")
 
     async def stop(self) -> None:
         """Stop the channel."""

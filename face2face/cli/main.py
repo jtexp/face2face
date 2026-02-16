@@ -32,12 +32,15 @@ def _setup_logging(level: str) -> None:
 @click.group()
 @click.option("--config", "-c", type=click.Path(), default=None,
               help="Path to config file")
+@click.option("--verbose", "-v", is_flag=True, default=False,
+              help="Enable verbose/debug logging")
 @click.pass_context
-def cli(ctx: click.Context, config: str | None) -> None:
+def cli(ctx: click.Context, config: str | None, verbose: bool) -> None:
     """face2face: HTTP proxy over visual channel (webcam/screen)."""
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config
     ctx.obj["config"] = load_config(config)
+    ctx.obj["verbose"] = verbose
 
 
 @cli.command()
@@ -68,7 +71,8 @@ def client(ctx: click.Context, port: int | None, host: str | None,
     if fullscreen:
         config.fullscreen = True
 
-    _setup_logging(config.log_level)
+    level = "DEBUG" if ctx.obj.get("verbose") else config.log_level
+    _setup_logging(level)
     logger = logging.getLogger("face2face.client")
 
     async def run():
@@ -124,7 +128,8 @@ def server(ctx: click.Context, fullscreen: bool) -> None:
     if fullscreen:
         config.fullscreen = True
 
-    _setup_logging(config.log_level)
+    level = "DEBUG" if ctx.obj.get("verbose") else config.log_level
+    _setup_logging(level)
     logger = logging.getLogger("face2face.server")
 
     async def run():

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,6 +30,7 @@ class WebcamCapture:
 
     def open(self) -> None:
         """Open the webcam."""
+        logger.info("Opening webcam (index=%d) ...", self.config.camera_index)
         self._cap = cv2.VideoCapture(self.config.camera_index)
         if not self._cap.isOpened():
             raise RuntimeError(
@@ -34,6 +38,11 @@ class WebcamCapture:
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
         self._cap.set(cv2.CAP_PROP_FPS, self.config.fps)
+        # Report actual resolution (driver may not honor the request)
+        actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        actual_fps = self._cap.get(cv2.CAP_PROP_FPS)
+        logger.info("Webcam ready: %dx%d @ %.0f fps", actual_w, actual_h, actual_fps)
 
     def read(self) -> Optional[np.ndarray]:
         """Read a single frame. Returns BGR image or None on failure."""

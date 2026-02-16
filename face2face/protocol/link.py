@@ -56,7 +56,13 @@ class TransmitLink:
         """
         async with self._tx_lock:
             frames = self.framer.frame_message(data, msg_id=msg_id)
-            return await self.arq.send_reliable(frames, self._tx_frame)
+            logger.debug("TX: sending %d bytes as %d frame(s)", len(data), len(frames))
+            result = await self.arq.send_reliable(frames, self._tx_frame)
+            if result:
+                logger.debug("TX: message sent successfully (%d bytes)", len(data))
+            else:
+                logger.warning("TX: message send failed after retries (%d bytes)", len(data))
+            return result
 
     async def send_control(self, flags: int, msg_id: int = 0,
                            seq: int = 0) -> None:
@@ -85,6 +91,11 @@ class ReceiveLink:
         """Start the receive loop."""
         self.capture.open()
         self._running = True
+        codec = self.config.codec
+        logger.info("RX link started — grid=%dx%d, %d bits/cell, %d bytes/frame",
+                     codec.grid_cols, codec.grid_rows, codec.bits_per_cell,
+                     codec.payload_bytes)
+        logger.info("Scanning for frames ...")
 
     async def stop(self) -> None:
         """Stop the receive loop."""
@@ -100,17 +111,27 @@ class ReceiveLink:
         loop = asyncio.get_event_loop()
         frame = await loop.run_in_executor(None, self.capture.read_preprocessed)
         if frame is None:
+            logger.debug("Webcam returned no frame")
             return None
 
         # Skip blank/sync frames
         if self.decoder.is_blank_frame(frame):
+            logger.debug("Blank/sync frame detected, skipping")
             return None
 
         header, payload = self.decoder.decode_image(frame)
         if header is None:
+            logger.debug("No data frame detected in webcam image")
             return None
 
         valid = payload is not None
+        if valid:
+            logger.debug("Frame decoded OK: msg_id=%d seq=%d/%d (%d bytes)",
+                         header.msg_id, header.seq, header.total,
+                         len(payload) if payload else 0)
+        else:
+            logger.debug("Frame header found but payload CRC failed: msg_id=%d seq=%d/%d",
+                         header.msg_id, header.seq, header.total)
         return header, payload if payload else b"", valid
 
     async def run_receive_loop(
@@ -131,11 +152,12 @@ class ReceiveLink:
 
             # Handle control frames
             if header.flags & FrameFlags.ACK:
-                # Forward ACK to the sender's ARQ
+                logger.debug("RX: ACK for msg_id=%d seq=%d", header.msg_id, header.seq)
                 if self._frame_callback:
                     self._frame_callback("ack", header)
                 continue
             if header.flags & FrameFlags.NACK:
+                logger.debug("RX: NACK for msg_id=%d seq=%d", header.msg_id, header.seq)
                 if self._frame_callback:
                     self._frame_callback("nack", header)
                 continue
@@ -143,9 +165,13 @@ class ReceiveLink:
             # Data frame — send ACK/NACK back
             ack_payload, ack_header = self.arq.on_frame_received(header, valid)
             if ack_header.flags == FrameFlags.ACK:
+                logger.debug("RX: sending ACK for msg_id=%d seq=%d/%d",
+                             header.msg_id, header.seq, header.total)
                 await ack_sender.send_control(
                     FrameFlags.ACK, header.msg_id, header.seq)
             else:
+                logger.debug("RX: sending NACK for msg_id=%d seq=%d/%d (CRC fail)",
+                             header.msg_id, header.seq, header.total)
                 await ack_sender.send_control(
                     FrameFlags.NACK, header.msg_id, header.seq)
                 continue
@@ -157,6 +183,8 @@ class ReceiveLink:
             # Try to assemble
             complete = self.assembler.add_frame(header, payload)
             if complete is not None:
+                logger.info("Message assembled: msg_id=%d, %d bytes",
+                            header.msg_id, len(complete))
                 self.arq.cleanup(header.msg_id)
                 await self._message_queue.put((header.msg_id, complete))
 
