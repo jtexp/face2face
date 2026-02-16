@@ -192,6 +192,9 @@ class ReceiveLink:
                 if self._frame_callback:
                     self._frame_callback("nack", header)
                 continue
+            if header.flags & FrameFlags.KEEPALIVE:
+                logger.debug("RX: ignoring KEEPALIVE frame")
+                continue
 
             # Data frame — send ACK back
             ack_payload, ack_header = self.arq.on_frame_received(header, valid)
