@@ -1,0 +1,177 @@
+"""Link manager: manages one direction of the visual link (tx or rx).
+
+Coordinates the visual encoder+renderer (for tx) or capture+decoder (for rx)
+and exposes an async interface for upper layers.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
+import numpy as np
+
+from ..visual.capture import CaptureConfig, WebcamCapture
+from ..visual.codec import CodecConfig, FrameEncoder, FrameFlags, FrameHeader
+from ..visual.decoder import DecoderConfig, ImageFrameDecoder
+from ..visual.renderer import RendererConfig, ScreenRenderer
+from .framing import FramingConfig, MessageAssembler, MessageFramer
+from .flow import ARQReceiver, ARQSender, FlowConfig
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LinkConfig:
+    codec: CodecConfig = field(default_factory=CodecConfig)
+    renderer: RendererConfig = field(default_factory=RendererConfig)
+    capture: CaptureConfig = field(default_factory=CaptureConfig)
+    decoder: DecoderConfig = field(default_factory=DecoderConfig)
+    framing: FramingConfig = field(default_factory=FramingConfig)
+    flow: FlowConfig = field(default_factory=FlowConfig)
+    rx_poll_interval: float = 0.05  # seconds between webcam reads
+
+
+class TransmitLink:
+    """Manages outbound visual transmission (screen display)."""
+
+    def __init__(self, config: Optional[LinkConfig] = None):
+        self.config = config or LinkConfig()
+        self.renderer = ScreenRenderer(self.config.codec, self.config.renderer)
+        self.framer = MessageFramer(self.config.framing)
+        self.arq = ARQSender(self.config.flow)
+        self._tx_lock = asyncio.Lock()
+
+    async def _tx_frame(self, payload: bytes, header: FrameHeader) -> None:
+        """Physically transmit a frame via screen display."""
+        self.renderer.transmit_frame(payload, header)
+
+    async def send(self, data: bytes, msg_id: int | None = None) -> bool:
+        """Send a complete message reliably.
+
+        Splits into frames, displays each, and waits for ACKs.
+        Returns True on success.
+        """
+        async with self._tx_lock:
+            frames = self.framer.frame_message(data, msg_id=msg_id)
+            return await self.arq.send_reliable(frames, self._tx_frame)
+
+    async def send_control(self, flags: int, msg_id: int = 0,
+                           seq: int = 0) -> None:
+        """Send a single control frame (ACK, NACK, etc.)."""
+        payload, header = self.framer.frame_control(flags, msg_id, seq)
+        await self._tx_frame(payload, header)
+
+    def destroy(self) -> None:
+        self.renderer.destroy()
+
+
+class ReceiveLink:
+    """Manages inbound visual reception (webcam capture + decode)."""
+
+    def __init__(self, config: Optional[LinkConfig] = None):
+        self.config = config or LinkConfig()
+        self.capture = WebcamCapture(self.config.capture)
+        self.decoder = ImageFrameDecoder(self.config.codec, self.config.decoder)
+        self.assembler = MessageAssembler(self.config.framing)
+        self.arq = ARQReceiver(self.config.flow)
+        self._running = False
+        self._message_queue: asyncio.Queue[tuple[int, bytes]] = asyncio.Queue()
+        self._frame_callback: Optional[Callable] = None
+
+    async def start(self) -> None:
+        """Start the receive loop."""
+        self.capture.open()
+        self._running = True
+
+    async def stop(self) -> None:
+        """Stop the receive loop."""
+        self._running = False
+        self.capture.close()
+
+    async def receive_once(self) -> Optional[tuple[FrameHeader, bytes, bool]]:
+        """Capture and decode a single frame from the webcam.
+
+        Returns (header, payload, valid) or None if no frame detected.
+        Runs in a thread to avoid blocking the event loop.
+        """
+        loop = asyncio.get_event_loop()
+        frame = await loop.run_in_executor(None, self.capture.read_preprocessed)
+        if frame is None:
+            return None
+
+        # Skip blank/sync frames
+        if self.decoder.is_blank_frame(frame):
+            return None
+
+        header, payload = self.decoder.decode_image(frame)
+        if header is None:
+            return None
+
+        valid = payload is not None
+        return header, payload if payload else b"", valid
+
+    async def run_receive_loop(
+        self,
+        ack_sender: TransmitLink,
+    ) -> None:
+        """Continuously receive frames, send ACKs, and assemble messages.
+
+        Complete messages are placed on the internal message queue.
+        """
+        while self._running:
+            result = await self.receive_once()
+            if result is None:
+                await asyncio.sleep(self.config.rx_poll_interval)
+                continue
+
+            header, payload, valid = result
+
+            # Handle control frames
+            if header.flags & FrameFlags.ACK:
+                # Forward ACK to the sender's ARQ
+                if self._frame_callback:
+                    self._frame_callback("ack", header)
+                continue
+            if header.flags & FrameFlags.NACK:
+                if self._frame_callback:
+                    self._frame_callback("nack", header)
+                continue
+
+            # Data frame — send ACK/NACK back
+            ack_payload, ack_header = self.arq.on_frame_received(header, valid)
+            if ack_header.flags == FrameFlags.ACK:
+                await ack_sender.send_control(
+                    FrameFlags.ACK, header.msg_id, header.seq)
+            else:
+                await ack_sender.send_control(
+                    FrameFlags.NACK, header.msg_id, header.seq)
+                continue
+
+            # Skip duplicates for assembly
+            if not valid:
+                continue
+
+            # Try to assemble
+            complete = self.assembler.add_frame(header, payload)
+            if complete is not None:
+                self.arq.cleanup(header.msg_id)
+                await self._message_queue.put((header.msg_id, complete))
+
+    async def get_message(self, timeout: float = 30.0
+                          ) -> Optional[tuple[int, bytes]]:
+        """Wait for and return the next complete message.
+
+        Returns (msg_id, data) or None on timeout.
+        """
+        try:
+            return await asyncio.wait_for(
+                self._message_queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+
+    def set_frame_callback(self, callback: Callable) -> None:
+        """Set a callback for control frame events."""
+        self._frame_callback = callback
