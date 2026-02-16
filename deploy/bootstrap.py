@@ -112,9 +112,11 @@ def create_venv(venv_dir: Path):
     print(f"Creating venv at {venv_dir} ...")
     venv_dir.parent.mkdir(parents=True, exist_ok=True)
     subprocess.check_call([sys.executable, "-m", "venv", str(venv_dir)])
-    # Upgrade pip
+    # Upgrade pip — must use `python -m pip` instead of calling pip.exe
+    # directly, because pip 25+ on Windows refuses to overwrite its own
+    # running executable.
     subprocess.check_call(
-        [str(get_pip(venv_dir)), "install", "--upgrade", "pip"],
+        [str(get_python(venv_dir)), "-m", "pip", "install", "--upgrade", "pip"],
         stdout=subprocess.DEVNULL,
     )
     print("  venv created.")
@@ -122,7 +124,7 @@ def create_venv(venv_dir: Path):
 
 def install_package(venv_dir: Path, source: str):
     print(f"Installing face2face from {source} ...")
-    subprocess.check_call([str(get_pip(venv_dir)), "install", "--upgrade", source])
+    subprocess.check_call([str(get_python(venv_dir)), "-m", "pip", "install", "--upgrade", source])
     print("  Installed.")
 
 
