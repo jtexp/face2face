@@ -250,12 +250,10 @@ def server(ctx: click.Context, fullscreen: bool,
         # Main loop: dispatch incoming messages to forwarder
         async def dispatch_loop():
             while not stop_event.is_set():
-                result = await channel.rx.get_message(timeout=1.0)
+                result = await channel.accept(timeout=1.0)
                 if result is None:
                     continue
-                msg_id, data = result
-                # Each message gets its own stream for response routing
-                stream_id = msg_id  # Use msg_id as stream_id for simplicity
+                stream_id, data = result
                 task = asyncio.create_task(
                     forwarder.handle_request(stream_id, data))
                 request_tasks.add(task)

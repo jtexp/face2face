@@ -51,6 +51,8 @@ class VisualChannel:
         self._dispatch_task: Optional[asyncio.Task] = None
         self._next_stream_id = 1
         self._stream_id_lock = asyncio.Lock()
+        # Queue for incoming messages on unknown (not pre-allocated) streams
+        self._incoming_queue: asyncio.Queue[tuple[int, bytes]] = asyncio.Queue()
 
     async def start(self) -> None:
         """Start the channel — opens webcam, starts receive loop."""
@@ -130,6 +132,20 @@ class VisualChannel:
         except asyncio.TimeoutError:
             return None
 
+    async def accept(self, timeout: float | None = None) -> Optional[tuple[int, bytes]]:
+        """Wait for an incoming message on an unknown stream.
+
+        Returns (stream_id, data) or None on timeout.  Used by the server
+        to receive requests from clients without pre-allocating stream IDs.
+        """
+        if timeout is None:
+            timeout = self.config.message_timeout
+        try:
+            return await asyncio.wait_for(
+                self._incoming_queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+
     async def _dispatch_loop(self) -> None:
         """Dispatch received messages to stream queues."""
         while self._running:
@@ -152,9 +168,10 @@ class VisualChannel:
                                length, len(data))
 
             async with self._stream_lock:
-                if stream_id not in self._streams:
-                    self._streams[stream_id] = asyncio.Queue()
-                await self._streams[stream_id].put(data)
+                if stream_id in self._streams:
+                    await self._streams[stream_id].put(data)
+                else:
+                    await self._incoming_queue.put((stream_id, data))
 
             logger.debug("Dispatched %d bytes to stream %d",
                          len(data), stream_id)
