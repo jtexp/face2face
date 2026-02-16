@@ -71,6 +71,12 @@ class TransmitLink:
         payload, header = self.framer.frame_control(flags, msg_id, seq)
         await self._tx_frame(payload, header)
 
+    def show_idle(self) -> None:
+        """Display an idle frame (with ECC) so the grid is visible at startup."""
+        payload, header = self.framer.frame_control(
+            FrameFlags.KEEPALIVE, msg_id=0, seq=0)
+        self.renderer.show_idle(payload, header)
+
     def destroy(self) -> None:
         self.renderer.destroy()
 

@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from .codec import CodecConfig, FrameEncoder, FrameFlags, FrameHeader
+from .codec import CodecConfig, FrameEncoder, FrameHeader
 
 log = logging.getLogger(__name__)
 
@@ -146,11 +146,9 @@ class ScreenRenderer:
         for payload, header in frames:
             self.transmit_frame(payload, header)
 
-    def show_idle(self) -> None:
-        """Show an encoded test frame so the grid is detectable at startup."""
+    def show_idle(self, payload: bytes, header: FrameHeader) -> None:
+        """Show a pre-built frame so the grid is detectable at startup."""
         self._ensure_window()
-        header = FrameHeader(msg_id=0, seq=0, total=1, flags=FrameFlags.KEEPALIVE)
-        payload = b"\x00" * min(16, self.codec_cfg.payload_bytes)
         image = self.encoder.encode(payload, header)
         cv2.imshow(self.cfg.window_name, self._pad_image(image))
         cv2.waitKey(1)

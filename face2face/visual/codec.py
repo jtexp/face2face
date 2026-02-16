@@ -257,8 +257,10 @@ class FrameEncoder:
         cfg = self.config
         palette = cfg.palette
 
-        # Compute CRC of payload
-        header.crc32 = zlib.crc32(payload) & 0xFFFFFFFF
+        # Compute CRC over the full payload area (including the zero-padding
+        # the decoder will see) so that short payloads pass CRC on decode.
+        padded = payload.ljust(cfg.payload_bytes, b"\x00")
+        header.crc32 = zlib.crc32(padded) & 0xFFFFFFFF
         header_bytes = header.pack()
 
         # Convert header + payload to symbols
