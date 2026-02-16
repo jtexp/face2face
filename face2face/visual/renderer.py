@@ -19,6 +19,7 @@ class RendererConfig:
     frame_hold_ms: int = 500     # how long to display each frame
     blank_hold_ms: int = 100     # blank gap between frames for sync
     show_info: bool = True       # overlay text info on the frame
+    display_padding: int = 80    # black padding (px) around frame to isolate from window chrome
 
 
 class ScreenRenderer:
@@ -43,10 +44,29 @@ class ScreenRenderer:
             cv2.namedWindow(self.cfg.window_name, cv2.WINDOW_AUTOSIZE)
         self._window_created = True
 
+    def _pad_image(self, image: np.ndarray) -> np.ndarray:
+        """Add black padding around an image to isolate it from window chrome.
+
+        Without padding, the window title bar can be included in the
+        detected quadrilateral, shifting the grid and causing decode
+        failures.
+        """
+        pad = self.cfg.display_padding
+        if pad <= 0 or self.cfg.fullscreen:
+            return image
+        h, w = image.shape[:2]
+        channels = image.shape[2] if image.ndim == 3 else 1
+        if image.ndim == 3:
+            padded = np.zeros((h + 2 * pad, w + 2 * pad, channels), dtype=image.dtype)
+        else:
+            padded = np.zeros((h + 2 * pad, w + 2 * pad), dtype=image.dtype)
+        padded[pad:pad + h, pad:pad + w] = image
+        return padded
+
     def show_frame(self, image: np.ndarray) -> None:
         """Display a pre-encoded frame image."""
         self._ensure_window()
-        cv2.imshow(self.cfg.window_name, image)
+        cv2.imshow(self.cfg.window_name, self._pad_image(image))
         cv2.waitKey(self.cfg.frame_hold_ms)
 
     def show_blank(self) -> None:
@@ -55,7 +75,7 @@ class ScreenRenderer:
         h = self.codec_cfg.image_height
         w = self.codec_cfg.image_width
         blank = np.zeros((h, w, 3), dtype=np.uint8)
-        cv2.imshow(self.cfg.window_name, blank)
+        cv2.imshow(self.cfg.window_name, self._pad_image(blank))
         cv2.waitKey(self.cfg.blank_hold_ms)
 
     def show_sync_pattern(self) -> None:
@@ -64,7 +84,7 @@ class ScreenRenderer:
         h = self.codec_cfg.image_height
         w = self.codec_cfg.image_width
         sync = np.full((h, w, 3), 255, dtype=np.uint8)
-        cv2.imshow(self.cfg.window_name, sync)
+        cv2.imshow(self.cfg.window_name, self._pad_image(sync))
         cv2.waitKey(self.cfg.blank_hold_ms)
 
     def transmit_frame(self, payload: bytes, header: FrameHeader) -> None:
@@ -90,7 +110,7 @@ class ScreenRenderer:
             for x in range(0, w, cell):
                 if ((y // cell) + (x // cell)) % 2 == 0:
                     img[y:y + cell, x:x + cell] = (128, 128, 128)
-        cv2.imshow(self.cfg.window_name, img)
+        cv2.imshow(self.cfg.window_name, self._pad_image(img))
         cv2.waitKey(1)
 
     def destroy(self) -> None:
