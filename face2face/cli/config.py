@@ -60,6 +60,12 @@ class AppConfig:
     # Logging
     log_level: str = "INFO"
 
+    # Debug
+    debug_capture_dir: str | None = None
+
+    # Monitor
+    enable_monitor: bool = False
+
     def to_codec_config(self) -> CodecConfig:
         return CodecConfig(
             grid_cols=self.grid_cols,
@@ -105,9 +111,10 @@ class AppConfig:
             codec=self.to_codec_config(),
             renderer=self.to_renderer_config(),
             capture=self.to_capture_config(),
-            decoder=DecoderConfig(),
+            decoder=DecoderConfig(debug_dir=self.debug_capture_dir),
             framing=self.to_framing_config(),
             flow=self.to_flow_config(),
+            enable_monitor=self.enable_monitor,
         )
 
     def to_channel_config(self) -> ChannelConfig:

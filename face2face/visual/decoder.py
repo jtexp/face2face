@@ -10,11 +10,16 @@ Steps:
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from .codec import (
     CodecConfig,
@@ -31,6 +36,7 @@ class DecoderConfig:
     adaptive_c: int = 2
     sample_margin: float = 0.25  # fraction of cell to skip at edges when sampling
     adaptive_palette: bool = True  # calibrate palette from marker cells
+    debug_dir: Optional[str] = None  # save debug frames to this directory
 
 
 class ImageFrameDecoder:
@@ -42,10 +48,17 @@ class ImageFrameDecoder:
         self.cfg = decoder_cfg or DecoderConfig()
         self.grid_decoder = GridDecoder(config=codec_cfg)
         self._last_confidence: float = 0.0
+        self._last_corners: Optional[np.ndarray] = None
+        self._debug_seq: int = 0
+        self._debug_last_save: float = 0.0
 
     @property
     def last_confidence(self) -> float:
         return self._last_confidence
+
+    @property
+    def last_corners(self) -> Optional[np.ndarray]:
+        return self._last_corners
 
     def decode_image(self, image: np.ndarray) -> tuple[Optional[FrameHeader], Optional[bytes]]:
         """Attempt to decode a frame from a camera image.
@@ -53,6 +66,7 @@ class ImageFrameDecoder:
         Returns (header, payload) or (None, None) if no valid frame found.
         """
         corners = self._find_corners(image)
+        self._last_corners = corners
         if corners is None:
             self._last_confidence = 0.0
             return None, None
@@ -71,7 +85,60 @@ class ImageFrameDecoder:
         grid = self._sample_grid(warped, palette)
         self._last_confidence = 1.0
 
+        # Debug capture: save raw, warped, and grid overlay frames
+        if self.cfg.debug_dir is not None:
+            now = time.monotonic()
+            if now - self._debug_last_save >= 0.5:  # max 2 saves/sec
+                self._debug_last_save = now
+                self._save_debug_frames(image, warped, grid, palette)
+
         return self.grid_decoder.decode_grid(grid)
+
+    def _save_debug_frames(self, raw: np.ndarray, warped: np.ndarray,
+                           grid: np.ndarray, palette: np.ndarray) -> None:
+        """Save debug frames to disk."""
+        debug_dir = Path(self.cfg.debug_dir)
+        seq = self._debug_seq
+        self._debug_seq += 1
+
+        try:
+            prefix = str(debug_dir / f"{seq:04d}")
+            cv2.imwrite(f"{prefix}_raw.png", raw)
+            cv2.imwrite(f"{prefix}_warped.png", warped)
+            grid_img = self._draw_grid_overlay(warped, grid, palette)
+            cv2.imwrite(f"{prefix}_grid.png", grid_img)
+            logger.debug("Saved debug frames %s_*.png", prefix)
+        except Exception:
+            logger.warning("Failed to save debug frame %04d", seq, exc_info=True)
+
+    def _draw_grid_overlay(self, warped: np.ndarray, grid: np.ndarray,
+                           palette: np.ndarray) -> np.ndarray:
+        """Draw cell boundaries and decoded colors on a copy of the warped frame."""
+        overlay = warped.copy()
+        cfg = self.codec_cfg
+        border_offset = cfg.border_px * cfg.cell_px
+
+        for r in range(cfg.grid_rows):
+            for c in range(cfg.grid_cols):
+                y = border_offset + r * cfg.cell_px
+                x = border_offset + c * cfg.cell_px
+                sym = int(grid[r, c])
+                color = tuple(int(v) for v in palette[sym])
+
+                # Fill cell center with a semi-transparent decoded color
+                cell_region = overlay[y:y + cfg.cell_px, x:x + cfg.cell_px]
+                if cell_region.size > 0:
+                    tinted = cv2.addWeighted(
+                        cell_region, 0.5,
+                        np.full_like(cell_region, color), 0.5, 0)
+                    overlay[y:y + cfg.cell_px, x:x + cfg.cell_px] = tinted
+
+                # Draw cell boundary
+                cv2.rectangle(overlay, (x, y),
+                              (x + cfg.cell_px - 1, y + cfg.cell_px - 1),
+                              (0, 255, 0), 1)
+
+        return overlay
 
     def _find_corners(self, image: np.ndarray) -> Optional[np.ndarray]:
         """Find the 4 corner alignment markers.

@@ -190,4 +190,31 @@ pytest tests/test_visual_roundtrip.py -v # encode -> save -> load -> decode
 | `tools/decode_diagnose.py` | Step-by-step decode diagnostic |
 | `tools/capture_readme_images.py` | Generate the images in this README |
 
+## Debugging
+
+Use `--monitor` / `-m` to open a small live-preview window showing the webcam feed. When the decoder detects the frame quad, it's drawn as a green polygon; a colored status circle (green = frame detected, red = not detected) provides at-a-glance feedback. This is useful for aiming the camera before and during operation:
+
+```bash
+face2face client --monitor
+face2face server --monitor
+```
+
+If the visual link fails to decode (e.g. 100% CRC failures), use `--debug-capture` to save what the webcam actually sees:
+
+```bash
+# Save debug frames to a directory
+face2face client --debug-capture ./debug-frames
+face2face server --debug-capture ./debug-frames
+```
+
+This saves three images per capture (rate-limited to 2/sec):
+
+| File | Contents |
+|------|----------|
+| `0000_raw.png` | Raw webcam frame |
+| `0000_warped.png` | Perspective-corrected frame |
+| `0000_grid.png` | Warped frame with grid overlay and decoded cell colors |
+
+The grid overlay blends each cell with its decoded palette color and draws green cell boundaries, making it easy to spot where decoding goes wrong (color mis-classification, alignment drift, blurring, etc.).
+
 See [REAL_TEST_GUIDE.md](REAL_TEST_GUIDE.md) for detailed single-machine and WSL2 setup instructions.

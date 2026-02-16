@@ -32,6 +32,7 @@ class LinkConfig:
     framing: FramingConfig = field(default_factory=FramingConfig)
     flow: FlowConfig = field(default_factory=FlowConfig)
     rx_poll_interval: float = 0.05  # seconds between webcam reads
+    enable_monitor: bool = False
 
 
 class TransmitLink:
@@ -86,11 +87,16 @@ class ReceiveLink:
         self._running = False
         self._message_queue: asyncio.Queue[tuple[int, bytes]] = asyncio.Queue()
         self._frame_callback: Optional[Callable] = None
+        self.monitor = None
 
     async def start(self) -> None:
         """Start the receive loop."""
         self.capture.open()
         self._running = True
+        if self.config.enable_monitor:
+            from ..visual.monitor import WebcamMonitor
+            self.monitor = WebcamMonitor()
+            logger.info("Webcam monitor window enabled")
         codec = self.config.codec
         logger.info("RX link started — grid=%dx%d, %d bits/cell, %d bytes/frame",
                      codec.grid_cols, codec.grid_rows, codec.bits_per_cell,
@@ -101,6 +107,9 @@ class ReceiveLink:
         """Stop the receive loop."""
         self._running = False
         self.capture.close()
+        if self.monitor is not None:
+            self.monitor.destroy()
+            self.monitor = None
 
     async def receive_once(self) -> Optional[tuple[FrameHeader, bytes, bool]]:
         """Capture and decode a single frame from the webcam.
@@ -117,9 +126,13 @@ class ReceiveLink:
         # Skip blank/sync frames
         if self.decoder.is_blank_frame(frame):
             logger.debug("Blank/sync frame detected, skipping")
+            if self.monitor is not None:
+                self.monitor.update(frame)
             return None
 
         header, payload = self.decoder.decode_image(frame)
+        if self.monitor is not None:
+            self.monitor.update(frame, self.decoder.last_corners)
         if header is None:
             logger.debug("No data frame detected in webcam image")
             return None

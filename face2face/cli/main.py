@@ -50,9 +50,14 @@ def cli(ctx: click.Context, config: str | None, verbose: bool) -> None:
               help="Proxy listen host (default: 127.0.0.1)")
 @click.option("--fullscreen", "-f", is_flag=True, default=False,
               help="Display frames in fullscreen mode")
+@click.option("--debug-capture", "-d", type=click.Path(), default=None,
+              help="Save debug frames (raw, warped, grid) to this directory")
+@click.option("--monitor", "-m", is_flag=True, default=False,
+              help="Show a live webcam monitor window for camera alignment")
 @click.pass_context
 def client(ctx: click.Context, port: int | None, host: str | None,
-           fullscreen: bool) -> None:
+           fullscreen: bool, debug_capture: str | None,
+           monitor: bool) -> None:
     """Start the client (proxy server + visual transmitter/receiver).
 
     Run this on the machine that needs internet access.
@@ -70,6 +75,11 @@ def client(ctx: click.Context, port: int | None, host: str | None,
         config.proxy_host = host
     if fullscreen:
         config.fullscreen = True
+    if debug_capture is not None:
+        Path(debug_capture).mkdir(parents=True, exist_ok=True)
+        config.debug_capture_dir = debug_capture
+    if monitor:
+        config.enable_monitor = True
 
     level = "DEBUG" if ctx.obj.get("verbose") else config.log_level
     _setup_logging(level)
@@ -125,8 +135,13 @@ def client(ctx: click.Context, port: int | None, host: str | None,
 @cli.command()
 @click.option("--fullscreen", "-f", is_flag=True, default=False,
               help="Display frames in fullscreen mode")
+@click.option("--debug-capture", "-d", type=click.Path(), default=None,
+              help="Save debug frames (raw, warped, grid) to this directory")
+@click.option("--monitor", "-m", is_flag=True, default=False,
+              help="Show a live webcam monitor window for camera alignment")
 @click.pass_context
-def server(ctx: click.Context, fullscreen: bool) -> None:
+def server(ctx: click.Context, fullscreen: bool,
+           debug_capture: str | None, monitor: bool) -> None:
     """Start the server (HTTP forwarder + visual transmitter/receiver).
 
     Run this on the machine with internet access.
@@ -135,6 +150,11 @@ def server(ctx: click.Context, fullscreen: bool) -> None:
     config: AppConfig = ctx.obj["config"]
     if fullscreen:
         config.fullscreen = True
+    if debug_capture is not None:
+        Path(debug_capture).mkdir(parents=True, exist_ok=True)
+        config.debug_capture_dir = debug_capture
+    if monitor:
+        config.enable_monitor = True
 
     level = "DEBUG" if ctx.obj.get("verbose") else config.log_level
     _setup_logging(level)
