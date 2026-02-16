@@ -56,6 +56,9 @@ class VisualChannel:
         """Start the channel — opens webcam, starts receive loop."""
         logger.info("Starting visual channel ...")
         await self.rx.start()
+        # Show the TX grid window immediately so the other side's webcam
+        # (or a local --monitor ROI selection) can see it right away.
+        self.tx.renderer.show_idle()
         self._running = True
 
         # Wire up ACK/NACK forwarding from rx → tx
