@@ -130,7 +130,10 @@ def client(ctx: click.Context, port: int | None, host: str | None,
             await proxy.stop()
             await channel.stop()
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass
 
 
 @cli.command()
@@ -227,7 +230,10 @@ def server(ctx: click.Context, fullscreen: bool,
             await forwarder.stop()
             await channel.stop()
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass
 
 
 @cli.command()
